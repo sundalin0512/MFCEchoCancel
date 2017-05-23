@@ -4,6 +4,12 @@
 
 #pragma once
 
+enum class AlgorithmEnum
+{
+	LMS = 0,
+	NLMS = 1,
+	RLS = 2
+};
 
 // CMFCEchoCancelDlg 对话框
 class CMFCEchoCancelDlg : public CDialogEx
@@ -24,6 +30,7 @@ public:
 // 实现
 protected:
 	HICON m_hIcon;
+	AlgorithmEnum selectAlgorithm;
 
 	// 生成的消息映射函数
 	virtual BOOL OnInitDialog();
@@ -31,4 +38,10 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg HCURSOR OnQueryDragIcon();
 	DECLARE_MESSAGE_MAP()
+public:
+	afx_msg void OnBnClickedPickfarendfile();
+	afx_msg void OnBnClickedPicknearendfile();
+	afx_msg void OnBnClickedSelectlms();
+	afx_msg void OnBnClickedSelectnlms();
+	afx_msg void OnBnClickedSelectrls();
 };

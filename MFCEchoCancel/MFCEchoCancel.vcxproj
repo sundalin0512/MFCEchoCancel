@@ -182,6 +182,7 @@
     <Text Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AudioClient.h" />
     <ClInclude Include="MFCEchoCancel.h" />
     <ClInclude Include="MFCEchoCancelDlg.h" />
     <ClInclude Include="Resource.h" />

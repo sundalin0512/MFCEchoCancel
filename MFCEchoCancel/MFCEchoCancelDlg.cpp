@@ -12,7 +12,7 @@
 #endif
 
 
-// 用于应用程序“关于”菜单项的 CAboutDlg 对话框
+// 用于应用程序“关于"菜单项的 CAboutDlg 对话框
 
 class CAboutDlg : public CDialog
 {
@@ -64,6 +64,11 @@ BEGIN_MESSAGE_MAP(CMFCEchoCancelDlg, CDialogEx)
 	ON_WM_SYSCOMMAND()
 	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
+	ON_BN_CLICKED(IDC_PickFarEndFile, &CMFCEchoCancelDlg::OnBnClickedPickfarendfile)
+	ON_BN_CLICKED(IDC_PickNearEndFile, &CMFCEchoCancelDlg::OnBnClickedPicknearendfile)
+	ON_BN_CLICKED(IDC_SelectLMS, &CMFCEchoCancelDlg::OnBnClickedSelectlms)
+	ON_BN_CLICKED(IDC_SelectNLMS, &CMFCEchoCancelDlg::OnBnClickedSelectnlms)
+	ON_BN_CLICKED(IDC_SelectRLS, &CMFCEchoCancelDlg::OnBnClickedSelectrls)
 END_MESSAGE_MAP()
 
 
@@ -73,7 +78,7 @@ BOOL CMFCEchoCancelDlg::OnInitDialog()
 {
 	CDialogEx::OnInitDialog();
 
-	// 将“关于...”菜单项添加到系统菜单中。
+	// 将“关于..."菜单项添加到系统菜单中。
 
 	// IDM_ABOUTBOX 必须在系统命令范围内。
 	ASSERT((IDM_ABOUTBOX & 0xFFF0) == IDM_ABOUTBOX);
@@ -152,3 +157,56 @@ HCURSOR CMFCEchoCancelDlg::OnQueryDragIcon()
 	return static_cast<HCURSOR>(m_hIcon);
 }
 
+
+
+
+void CMFCEchoCancelDlg::OnBnClickedPickfarendfile()
+{
+	//获取远端音频路径
+	BOOL isOpen  = TRUE;     //是否打开(否则为保存)  
+	CString defaultDir  = L"C:\\Users\\sunda\\Documents";   //默认打开的文件路径  
+	CString fileName  = L"";         //默认打开的文件名  
+	CString filter  = L"文件 (*.wav)|*.wav||";   //文件过虑的类型  
+	CFileDialog openFileDlg(isOpen, defaultDir, fileName, OFN_HIDEREADONLY | OFN_READONLY, filter, NULL);
+	INT_PTR result  = openFileDlg.DoModal();
+	CString filePath = defaultDir;
+	if (result  == IDOK) {
+		filePath  = openFileDlg.GetPathName();
+	}
+	CWnd::SetDlgItemTextW(IDC_FarEndFilePath, filePath);
+
+}
+
+void CMFCEchoCancelDlg::OnBnClickedPicknearendfile()
+{
+	//获取近端音频路径
+	BOOL isOpen = TRUE;     //是否打开(否则为保存)  
+	CString defaultDir = L"C:\\Users\\sunda\\Documents";   //默认打开的文件路径  
+	CString fileName = L"";         //默认打开的文件名  
+	CString filter = L"文件 (*.wav)|*.wav||";   //文件过虑的类型  
+	CFileDialog openFileDlg(isOpen, defaultDir, fileName, OFN_HIDEREADONLY | OFN_READONLY, filter, NULL);
+	INT_PTR result = openFileDlg.DoModal();
+	CString filePath = defaultDir;
+	if (result == IDOK) {
+		filePath = openFileDlg.GetPathName();
+	}
+	CWnd::SetDlgItemTextW(IDC_NearEndFilePath, filePath);
+}
+
+
+void CMFCEchoCancelDlg::OnBnClickedSelectlms()
+{
+	selectAlgorithm = AlgorithmEnum::LMS;
+}
+
+
+void CMFCEchoCancelDlg::OnBnClickedSelectnlms()
+{
+	selectAlgorithm = AlgorithmEnum::NLMS;
+}
+
+
+void CMFCEchoCancelDlg::OnBnClickedSelectrls()
+{
+	selectAlgorithm = AlgorithmEnum::RLS;
+}
