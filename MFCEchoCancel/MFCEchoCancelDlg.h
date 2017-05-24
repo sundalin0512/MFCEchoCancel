@@ -4,12 +4,7 @@
 
 #pragma once
 
-enum class AlgorithmEnum
-{
-	LMS = 0,
-	NLMS = 1,
-	RLS = 2
-};
+
 
 // CMFCEchoCancelDlg 对话框
 class CMFCEchoCancelDlg : public CDialogEx
@@ -30,7 +25,7 @@ public:
 // 实现
 protected:
 	HICON m_hIcon;
-	AlgorithmEnum selectAlgorithm;
+	
 
 	// 生成的消息映射函数
 	virtual BOOL OnInitDialog();
@@ -44,4 +39,14 @@ public:
 	afx_msg void OnBnClickedSelectlms();
 	afx_msg void OnBnClickedSelectnlms();
 	afx_msg void OnBnClickedSelectrls();
+	afx_msg void OnBnClickedPlayfarendsound();
+	afx_msg void OnBnClickedStopplaysound();
+	afx_msg void OnBnClickedPlaynearendsound();
+	afx_msg void OnBnClickedPlaymixsound();
+	afx_msg void OnEnChangeDelaysetms();
+	afx_msg void OnBnClickedStaticdelay();
+	afx_msg void OnBnClickedRandondelay();
+	afx_msg void OnEnChangeMinrandondelay();
+	afx_msg void OnEnChangeMaxrandondelay();
+	afx_msg void OnBnClickedPlayprocessedsound();
 };

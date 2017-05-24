@@ -34,11 +34,13 @@ namespace MyAudioClient
 	const int ciFrameSize = 480;
 	const int REFTIMES_PER_SEC = 10000000;
 	const int REFTIMES_PER_MILLISEC = 10000;
+	const int audioLength20s = 48000 * 20;
 	const int audioLength5s = 48000 * 2;
 	const int audioLength1s = 48000;
 	const int audioLength500ms = 24000;
 	const int audioLength200ms = 9600;
 	const int audioLength100ms = 4800;
+	const int audioLength1ms = 48;
 
 	int renderProcessDataNum = 0;
 	int captureProcessDataNum = 0;
@@ -61,6 +63,12 @@ namespace MyAudioClient
 
 	WAVEFORMATEX *WaveFormat;
 
+	int delayMs = 0;
+	int caculateDelayMs = 0;
+	bool randonDelayFlag = 0;
+	int maxRandonDelayMs = 0;
+	int minRandonDelayMs = 0;
+
 	class WaveData
 	{
 	public:
@@ -82,6 +90,19 @@ namespace MyAudioClient
 		}
 	};
 
+	enum class AlgorithmEnum
+	{
+		LMS = 0,
+		NLMS = 1,
+		RLS = 2
+	};
+
+	enum class SoundType
+	{
+		origin = 0,
+		mix = 1,
+		processed = 2
+	};
 	float *tmpRenderData;
 	UINT tmpRenderFramesNum;
 	float *tmpCaptureData;
@@ -96,6 +117,8 @@ namespace MyAudioClient
 	WaveData *OutputDataQueue;
 	WaveData *OutputDataTail;
 
+
+	AlgorithmEnum selectAlgorithm;
 	//  Header for a WAV file - we define a structure describing the first few fields in the header for convenience.
 	//
 	struct WAVEHEADER
@@ -115,6 +138,12 @@ namespace MyAudioClient
 
 	//  Static wave DATA tag.
 	const BYTE szWaveData[] = { 'd', 'a', 't', 'a' };
+
+	void Stop()
+	{
+		StopFlag = true;
+
+	}
 
 	LRESULT SaveToFile()
 	{
@@ -141,7 +170,7 @@ namespace MyAudioClient
 				}
 				BufferSize *= sizeof(float) * 2;
 				DWORD waveFileSize = sizeof(WAVEHEADER) + sizeof(WAVEFORMATEX) + WaveFormat->cbSize + sizeof(szWaveData) + sizeof(DWORD) + static_cast<DWORD>(BufferSize);
-				BYTE *waveFileData = new (std::nothrow) BYTE[waveFileSize];
+				BYTE *waveFileData = new BYTE[waveFileSize];
 				BYTE *waveFilePointer = waveFileData;
 				WAVEHEADER *waveHeader = reinterpret_cast<WAVEHEADER *>(waveFileData);
 
@@ -211,26 +240,37 @@ namespace MyAudioClient
 	{
 		HANDLE hEvent = OpenEvent(EVENT_ALL_ACCESS, false, szLoadRenderDataEvent);
 		HANDLE hRenderEvent = OpenEvent(EVENT_ALL_ACCESS, false, szRenderThreadEvent);
+		int position = 0;
 		while (true)
 		{
 			if (StopFlag)
 				goto StopLoadData;
 			WaitForSingleObject(hEvent, INFINITE);
 			EnterCriticalSection(&criticalSection);
-			static int position = 0;
+			//static int position = 0;
 			int renderDataPosition = 0;
 			tmpRenderData = new float[tmpRenderFramesNum * 2];
 			while (CurrentRenderData->next != nullptr && renderDataPosition < tmpRenderFramesNum)
 			{
-				if (position == 0)
+				if (CurrentRenderData->size == 0)
+				{
 					CurrentRenderData = CurrentRenderData->next;
+					continue;
+				}
+				if (position == -1)
+				{
+					position = 0;
+					CurrentRenderData = CurrentRenderData->next;
+				}
 				for (; position < CurrentRenderData->size && renderDataPosition < tmpRenderFramesNum; position++, renderDataPosition++)
 				{
 					tmpRenderData[renderDataPosition * 2] = CurrentRenderData->data[position];
 					tmpRenderData[renderDataPosition * 2 + 1] = CurrentRenderData->data[position];
 				}
 				if (position == CurrentRenderData->size)
-					position = 0;
+					position = -1;
+				if (CurrentRenderData->count == 200)
+					Stop();
 
 			}
 			PulseEvent(hRenderEvent);
@@ -385,6 +425,8 @@ namespace MyAudioClient
 	RenderStop:
 		hr = pAudioClient->Stop();  // Stop playing.
 		EXIT_ON_ERROR(hr);
+
+		WaitForSingleObject(hThread, INFINITE);
 
 		CoTaskMemFree(pwfx);
 		SAFE_RELEASE(pEnumerator)
@@ -650,98 +692,290 @@ namespace MyAudioClient
 		return S_OK;
 	}
 
-	void Stop()
-	{
-		char ch;
-		scanf("%c", &ch);
-		StopFlag = true;
-	}
 
 
-	void LoadFromFile()
+
+	void LoadFromFile(CString fileName, CString echoFile = L"")
 	{
+		if (echoFile == L"")
+		{
+			FILE *fp_far = _wfopen(fileName, L"rb");
+			short *far_frame = new short[44];
+			fread(far_frame, sizeof(char), 44, fp_far);
+			long fileBegin = ftell(fp_far);
+			delete[]far_frame;
+			fseek(fp_far, 0, SEEK_END);
+			long fileEnd = ftell(fp_far);
+			int fileLength = (fileEnd - fileBegin) / 2;
+			far_frame = new short[audioLength100ms];
+			fseek(fp_far, 44, SEEK_SET);
+			int loopCount = 0;
+			while (!feof(fp_far) && loopCount < 200)
+			{
+				RenderDataTail->next = new WaveData();
+				RenderDataTail->next->count = RenderDataTail->count + 1;
+				RenderDataTail = RenderDataTail->next;
+				fread(far_frame, sizeof(short), audioLength100ms, fp_far);
+				RenderDataTail->size = audioLength100ms;
+				float *fTmp = new float[audioLength100ms];
+				for (int i = 0; i < audioLength100ms; i++)
+				{
+					fTmp[i] = far_frame[i] / float(65536 / 2);
+				}
+				RenderDataTail->data = fTmp;
+				loopCount++;
+			}
+			fclose(fp_far);
+		}
+		else
+		{
+			float delta = 1;
+			if (fileName == echoFile)
+			{
+				delta = 0.9;
+			}
+			int delay = 0;
+			if (randonDelayFlag)
+			{
+				time_t ThisTime;
+				time(&ThisTime);
+				srand(ThisTime);
+				delay = minRandonDelayMs + rand() % (maxRandonDelayMs - minRandonDelayMs);
+			}
+			else
+			{
+				delay = delayMs;
+			}
+			FILE *fp_far = _wfopen(echoFile, L"rb");
+			FILE *fp_near = _wfopen(fileName, L"rb");
+			FILE *fp_mix = _wfopen(L"mix.bin", L"wb");
+			FILE *fp_tmp = _wfopen(L"tmp.bin", L"wb");
+			short *far_frame = new short[44];
+			short *near_frame = new short[44];
+			fread(far_frame, sizeof(char), 44, fp_far);
+			fread(near_frame, sizeof(char), 44, fp_near);
+			long farFileBegin = ftell(fp_far);
+			long nearFileBegin = ftell(fp_near);
+			delete[] far_frame;
+			delete[] near_frame;
+			fseek(fp_far, 0, SEEK_END);
+			fseek(fp_near, 0, SEEK_END);
+			long farFileEnd = ftell(fp_far);
+			long nearFileEnd = ftell(fp_near);
+			int farFileLength = (farFileEnd - farFileBegin) / 2;
+			int nearFileLength = (nearFileEnd - nearFileBegin) / 2;
+			//Ω´‘∂∂À“Ù∆µ–¥»Î¡Ÿ ±Œƒº˛
+			far_frame = new short[delay * audioLength1ms];
+			RtlZeroMemory(far_frame, delay * audioLength1ms * sizeof(short));
+			fwrite(far_frame, sizeof(short), delay * audioLength1ms, fp_tmp);
+			delete[] far_frame;
+			far_frame = new short[audioLength1s * 30];
+			fseek(fp_far, 44, SEEK_SET);
+			fread(far_frame, sizeof(short), audioLength1s * 30, fp_far);
+			fwrite(far_frame, sizeof(short), audioLength1s * 30, fp_tmp);
+			delete[] far_frame;
+			fclose(fp_tmp);
+			fp_tmp = _wfopen(L"tmp.bin", L"rb");
+
+			far_frame = new short[audioLength100ms];
+			near_frame = new short[audioLength100ms];
+			//fseek(fp_far, 44 + delay * audioLength1ms * 2, SEEK_SET);
+
+			fseek(fp_near, 44, SEEK_SET);
+			int loopCount = 0;
+			while (!feof(fp_far) && loopCount < 200)
+			{
+				RenderDataTail->next = new WaveData();
+				RenderDataTail->next->count = RenderDataTail->count + 1;
+				RenderDataTail = RenderDataTail->next;
+				fread(far_frame, sizeof(short), audioLength100ms, fp_tmp);
+				fread(near_frame, sizeof(short), audioLength100ms, fp_near);
+				RenderDataTail->size = audioLength100ms;
+				float *fTmp = new float[audioLength100ms];
+				for (int i = 0; i < audioLength100ms; i++)
+				{
+					fTmp[i] = (far_frame[i] + near_frame[i] * delta) / float(65536 / 2);
+				}
+				RenderDataTail->data = fTmp;
+				loopCount++;
+				fwrite(fTmp, sizeof(float), audioLength100ms, fp_mix);
+			}
+			fclose(fp_far);
+			fclose(fp_near);
+			fclose(fp_mix);
+			fclose(fp_tmp);
+		}
+
 		//FILE *fp_far = fopen("farEnd.wav", "rb");
-		//short *far_frame = new short[44];
-		//fread(far_frame, sizeof(char), 44, fp_far);
-		//long fileBegin = ftell(fp_far);
+		//float *far_frame = new float[68];
+		//fread(far_frame, sizeof(char), 68, fp_far);
+		//long farFileBegin = ftell(fp_far);
 		//delete[]far_frame;
 		//fseek(fp_far, 0, SEEK_END);
-		//long fileEnd = ftell(fp_far);
-		//int fileLength = (fileEnd - fileBegin) / 2;
-		//far_frame = new short[audioLength100ms];
-		//fseek(fp_far, 44, SEEK_SET);
+		//long farFileEnd = ftell(fp_far);
+		//int farFileLength = (farFileEnd - farFileBegin) / 2;
+		//far_frame = new float[audioLength100ms * 2];
+		//fseek(fp_far, 68, SEEK_SET);
 		//while (!feof(fp_far))
 		//{
 		//	RenderDataTail->next = new WaveData();
 		//	RenderDataTail->next->count = RenderDataTail->count + 1;
 		//	RenderDataTail = RenderDataTail->next;
-		//	fread(far_frame, sizeof(short), audioLength100ms, fp_far);
+		//	fread(far_frame, sizeof(float), audioLength100ms * 2, fp_far);
 		//	RenderDataTail->size = audioLength100ms;
 		//	float *fTmp = new float[audioLength100ms];
 		//	for (int i = 0; i < audioLength100ms; i++)
 		//	{
-		//		fTmp[i] = far_frame[i] / float(65536 / 2);
+		//		fTmp[i] = far_frame[i * 2];
 		//	}
 		//	RenderDataTail->data = fTmp;
 		//}
 		//fclose(fp_far);
-
-
-		FILE *fp_far = fopen("farEnd.wav", "rb");
-		float *far_frame = new float[68];
-		fread(far_frame, sizeof(char), 68, fp_far);
-		long fileBegin = ftell(fp_far);
-		delete[]far_frame;
-		fseek(fp_far, 0, SEEK_END);
-		long fileEnd = ftell(fp_far);
-		int fileLength = (fileEnd - fileBegin) / 2;
-		far_frame = new float[audioLength100ms * 2];
-		fseek(fp_far, 68, SEEK_SET);
-		while (!feof(fp_far))
-		{
-			RenderDataTail->next = new WaveData();
-			RenderDataTail->next->count = RenderDataTail->count + 1;
-			RenderDataTail = RenderDataTail->next;
-			fread(far_frame, sizeof(float), audioLength100ms * 2, fp_far);
-			RenderDataTail->size = audioLength100ms;
-			float *fTmp = new float[audioLength100ms];
-			for (int i = 0; i < audioLength100ms; i++)
-			{
-				fTmp[i] = far_frame[i * 2];
-			}
-			RenderDataTail->data = fTmp;
-		}
-		fclose(fp_far);
 	}
-	int init()
-	{
-		CaptureDataTail = new WaveData();
 
-		CaptureDataQueue = CaptureDataTail;
-		CaptureProcessDataQueue = CaptureDataTail;
+
+	void RenderProcess()
+	{
+		HANDLE hRenderThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)RenderThread, NULL, 0, 0);
+		WaitForSingleObject(hRenderThread, INFINITE);
+		Sleep(100);
+		DeleteCriticalSection(&criticalSection);
+		while (RenderDataQueue != nullptr)
+		{
+			WaveData* tmp = RenderDataQueue;
+			RenderDataQueue = RenderDataQueue->next;
+			delete tmp;
+		}
+	}
+
+	int DoProcess(CString fileName)
+	{
+		FILE *fp_far = _wfopen(fileName, L"rb");
+		FILE *fp_mix = _wfopen(L"mix.bin", L"rb");
+		fseek(fp_far, 44, SEEK_SET);
+		short *frame_far = new short[audioLength1s * 20];
+		fread(frame_far, sizeof(short), audioLength1s * 20, fp_far);
+		float *fFrame_far = new float[audioLength1s * 20];
+		for (int i = 0; i < audioLength1s * 20; i++)
+		{
+			fFrame_far[i] = frame_far[i] / float(65536 / 2);
+		}
+		float *fFrame_mix = new float[audioLength1s * 20];
+		fread(fFrame_mix, sizeof(float), audioLength1s * 20, fp_mix);
+
+
+		delayEstimation_initialize();
+		FloatArray  *farEnd;
+		FloatArray  *nearEnd;
+		FloatArray *echo, *m, *en;
+		int iter = 50;
+		farEnd = CreateFloatArray(fFrame_far, audioLength1s * 20, 1);
+		nearEnd = CreateFloatArray(fFrame_mix, audioLength1s * 20, 1);
+		int delay = delayEstimation(farEnd, nearEnd);
+		emxDestroyArray_real32_T(farEnd);
+		emxDestroyArray_real32_T(nearEnd);
+		float *echo_f = new float[audioLength1s * 20];
+		float *m_f = new float[audioLength1s * 20];
+		float *en_f = new float[audioLength1s * 20];
+		float *farEnd_tmp = new float[audioLength1s * 20];
+		ZeroMemory(echo_f, sizeof(float)*(audioLength1s * 20));
+		ZeroMemory(m_f, sizeof(float)*(audioLength1s * 20));
+		ZeroMemory(en_f, sizeof(float)*(audioLength1s * 20));
+		ZeroMemory(farEnd_tmp, sizeof(float)*(audioLength1s * 20));
+
+		CopyMemory(farEnd_tmp + delay, fFrame_far, sizeof(float)*(audioLength1s * 20 - delay));
+		
+
+		
+		if (selectAlgorithm == AlgorithmEnum::LMS)
+		{
+			farEnd = CreateFloatArray(farEnd_tmp, 1, audioLength1s * 20);
+			nearEnd = CreateFloatArray(fFrame_mix, 1, audioLength1s * 20);
+			echo = CreateFloatArray(echo_f, 1, audioLength1s * 20);
+			m = CreateFloatArray(m_f, 1, iter);
+			en = CreateFloatArray(en_f, audioLength1s * 20, 1);
+			LMS(nearEnd, farEnd, iter, 0.005, 0, echo, m, en);
+		}
+		else if (selectAlgorithm == AlgorithmEnum::NLMS)
+		{
+			farEnd = CreateFloatArray(farEnd_tmp, 1, audioLength1s * 20);
+			nearEnd = CreateFloatArray(fFrame_mix, 1, audioLength1s * 20);
+			echo = CreateFloatArray(echo_f, 1, audioLength1s * 20);
+			m = CreateFloatArray(m_f, 1, iter);
+			en = CreateFloatArray(en_f, audioLength1s * 20, 1);
+			NLMS(nearEnd, farEnd, iter, 1, 0, echo, m, en);
+		}
+		else
+		{
+			farEnd = CreateFloatArray(farEnd_tmp, audioLength1s * 20, 1);
+			nearEnd = CreateFloatArray(fFrame_mix, audioLength1s * 20,1);
+			echo = CreateFloatArray(echo_f, audioLength1s * 20, 1);
+			m = CreateFloatArray(m_f, 1, iter);
+			en = CreateFloatArray(en_f, audioLength1s * 20, 1);
+			RLS(nearEnd, farEnd, 50, 0, echo, m, en);
+		}
+		RenderDataTail->next = new WaveData();
+		RenderDataTail->next->count = RenderDataTail->count + 1;
+		RenderDataTail = RenderDataTail->next;
+		RenderDataTail->size = audioLength1s * 20;
+		RenderDataTail->data = new float[audioLength1s * 20];
+		for (int i = 0; i < audioLength1s * 20; i++)
+		{
+			RenderDataTail->data[i] = fFrame_mix[i] - echo_f[i];
+		}
+		RenderDataTail->next = new WaveData();
+		RenderDataTail->next->count = RenderDataTail->count + 1;
+		delayEstimation_terminate();
+		fclose(fp_far);
+		fclose(fp_mix);
+
+		return delay;
+	}
+
+	int Play(CString fileName, SoundType flag = SoundType::origin, CString echoFileName = L"")
+	{
+		//fileNameŒ™Ω¸∂À“Ù∆µ£¨echoFileNameŒ™‘∂∂À“Ù∆µ
+
+		StopFlag = false;
+		//CaptureDataTail = new WaveData();
+
+		//CaptureDataQueue = CaptureDataTail;
+		//CaptureProcessDataQueue = CaptureDataTail;
 		//RenderDataTail = CaptureDataQueue;
 		RenderDataTail = new WaveData();
 		RenderDataQueue = RenderDataTail;
-		RenderProcessDataQueue = RenderDataTail;
+		//RenderProcessDataQueue = RenderDataTail;
 		CurrentRenderData = RenderDataTail;
 
-		OutputDataTail = new WaveData();
-		OutputDataQueue = OutputDataTail;
-		LoadFromFile();
+		int delay = 0;
+		//OutputDataTail = new WaveData();
+		//OutputDataQueue = OutputDataTail;
+		if (flag == SoundType::origin)
+		{
+			LoadFromFile(fileName);
+		}
+		else if (flag == SoundType::mix)
+		{
+			LoadFromFile(fileName, echoFileName);
+		}
+		else
+		{
+			delay = DoProcess(echoFileName);
+		}
 		InitializeCriticalSection(&criticalSection);
 
-		HANDLE hRenderThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)RenderThread, NULL, 0, 0);
-		HANDLE hCaptureThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)CaptureThread, NULL, 0, 0);
-		HANDLE hProcessThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)ProcessThread, NULL, 0, 0);
-		HANDLE hStopThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)Stop, NULL, 0, 0);
+		HANDLE hRenderThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)RenderProcess, NULL, 0, 0);
+		//HANDLE hCaptureThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)CaptureThread, NULL, 0, 0);
+		//HANDLE hProcessThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)ProcessThread, NULL, 0, 0);
+		//HANDLE hStopThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)Stop, NULL, 0, 0);
 
-		WaitForSingleObject(hProcessThread, INFINITE);
-		Sleep(100);
-		SaveToFile();
-		DeleteCriticalSection(&criticalSection);
+		//WaitForSingleObject(hRenderThread, INFINITE);
+		//Sleep(100);
+		////SaveToFile();
+		//DeleteCriticalSection(&criticalSection);
 
 
-		return 0;
+		return delay;
 	}
 
 
